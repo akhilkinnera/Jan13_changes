@@ -2387,78 +2387,103 @@
                 if (!response.ok) throw new Error("Status file not found");
                 
                 const data = await response.json();
-                
-                // Debug log to see what data came in
-                console.log('Loaded status.json:', data);
+                console.log('Fetched data:', data); // Log fetched data
 
-                // Handle both single object (one update) or array (multiple updates)
-                const items = Array.isArray(data) ? data : [data];
-                
+                // Parse correctly - Expecting { body: [...] }
+                let items = [];
+                if (data.body && Array.isArray(data.body)) {
+                    items = data.body;
+                } else if (Array.isArray(data)) {
+                    items = data; // Fallback if structure is just array
+                } else {
+                    items = [data]; // Fallback if single object
+                }
+
+                // Build ID -> Status Map
+                const statusMap = {};
                 items.forEach(item => {
-                    // Safety check: if item or item.status is missing, skip
-                    if (!item || !item.status) return;
+                    // Handle different casing/structures from SharePoint/PA
+                    const id = item.ID || item.id || item.Id;
+                    
+                    // Handle complex Choice column structure (Availability: { Value: "..." }) or simple "..."
+                    let statusVal = null;
+                    if (item.Availability && item.Availability.Value) {
+                        statusVal = item.Availability.Value;
+                    } else if (item.Availability) {
+                        statusVal = item.Availability;
+                    } else if (item.status) {
+                        statusVal = item.status; // Fallback to previous simple JSON structure
+                    } else if (item.Status) {
+                        statusVal = item.Status;
+                    }
 
-                    // Normalize status string for comparison
-                    const statusLower = String(item.status).trim().toLowerCase();
+                    if (id && statusVal) {
+                        statusMap[id] = statusVal;
+                    }
+                });
+                
+                console.log('Status Map:', statusMap); // Log built map
 
-                    // Find card by ID from the JSON
-                    const card = document.querySelector(`.equipment-card[data-id="${item.id}"]`);
-                    if (card) {
-                         const badge = card.querySelector('.status-badge');
-                         const bookBtn = card.querySelector('.book-btn');
-                         
-                         if(badge) {
-                             // Update text to match what came from the list
-                             badge.innerText = item.status;
-                             
-                             // Reset classes first
-                             badge.className = 'status-badge';
-                             
-                             // Logic for all 4 status states
-                             if (statusLower.includes('available') && !statusLower.includes('not')) {
-                                 // "Available"
-                                 badge.classList.add('available');
-                                 if(bookBtn) {
-                                     bookBtn.classList.remove('disabled');
-                                     bookBtn.innerText = 'Book';
-                                 }
-                             } else if (statusLower.includes('maintenance')) {
-                                 // "Maintenance"
-                                 badge.classList.add('maintenance');
-                                 if(bookBtn) {
+                // Loop through DOM cards
+                const cards = document.querySelectorAll('.equipment-card[data-id]');
+                
+                cards.forEach(card => {
+                    const id = card.getAttribute('data-id');
+                    const newStatus = statusMap[id];
+
+                    if (newStatus) {
+                        console.log(`Updating Card ID ${id} to status: ${newStatus}`);
+                        const badge = card.querySelector('.status-badge');
+                        const bookBtn = card.querySelector('.book-btn');
+
+                        if (badge) {
+                            // Update Text
+                            badge.innerText = newStatus;
+
+                            // Reset & Apply Classes
+                            badge.className = 'status-badge'; // Reset classes
+                            
+                            const statusLower = String(newStatus).trim().toLowerCase();
+                            
+                            // Map to CSS classes
+                            if (statusLower === 'available') {
+                                badge.classList.add('available');
+                                if(bookBtn) {
+                                    bookBtn.classList.remove('disabled');
+                                    bookBtn.innerText = 'Book';
+                                }
+                            } else if (statusLower === 'maintenance') {
+                                badge.classList.add('maintenance');
+                                if(bookBtn) {
                                     bookBtn.classList.add('disabled');
                                     bookBtn.innerText = 'Service';
-                                 }
-                             } else if (statusLower.includes('limited')) {
-                                 // "Limited Access"
-                                 badge.classList.add('limited');
-                                 if(bookBtn) {
-                                     // Enable booking for limited access
-                                     bookBtn.classList.remove('disabled');
-                                     bookBtn.innerText = 'Book';
-                                 }
-                             } else if (statusLower.includes('not available')) {
-                                 // "Not available"
-                                 badge.classList.add('unavailable');
-                                 if(bookBtn) {
-                                     bookBtn.classList.add('disabled');
-                                     bookBtn.innerText = 'Unavailable';
-                                 }
-                             } else {
-                                 // Fallback for unknown status
-                                 badge.classList.add('unavailable');
-                                 if(bookBtn) {
-                                     bookBtn.classList.add('disabled');
-                                     bookBtn.innerText = 'Unavailable';
-                                 }
-                             }
-                         }
+                                }
+                            } else if (statusLower === 'limited access' || statusLower.includes('limited')) {
+                                badge.classList.add('limited');
+                                if(bookBtn) {
+                                    bookBtn.classList.remove('disabled');
+                                    bookBtn.innerText = 'Book'; 
+                                }
+                            } else if (statusLower === 'not available') {
+                                badge.classList.add('unavailable');
+                                if(bookBtn) {
+                                    bookBtn.classList.add('disabled');
+                                    bookBtn.innerText = 'Unavailable';
+                                }
+                            } else {
+                                // Default fallback
+                                badge.classList.add('unavailable');
+                                if(bookBtn) {
+                                    bookBtn.classList.add('disabled');
+                                    bookBtn.innerText = 'Unavailable';
+                                }
+                            }
+                        }
                     }
                 });
 
             } catch (error) {
-                // Silent error (common if file doesn't exist yet on first run)
-                console.log('Live update waiting...', error);
+                console.error('Error fetching status:', error);
             }
         }
 
